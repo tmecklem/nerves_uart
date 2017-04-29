@@ -27,7 +27,8 @@ defmodule Nerves.UART.Framing.Line do
     @moduledoc false
     defstruct [
       max_length: nil,
-      separator: nil,
+      rx_separator: nil,
+      tx_separator: nil,
       processed: <<>>,
       in_process: <<>>
     ]
@@ -35,20 +36,37 @@ defmodule Nerves.UART.Framing.Line do
 
   def init(args) do
     max_length = Keyword.get(args, :max_length, 4096)
-    separator = Keyword.get(args, :separator, "\n")
+    rx_separator = rx_separator(args)
+    tx_separator = tx_separator(args)
 
-    state = %State{max_length: max_length, separator: separator}
+    state = %State{max_length: max_length,
+                   rx_separator: rx_separator,
+                   tx_separator: tx_separator}
     {:ok, state}
   end
 
+  def rx_separator(args) do
+    case Keyword.get(args, :rx_separator) do
+      nil -> Keyword.get(args, :separator, "\n")
+      val -> val
+    end
+  end
+
+  def tx_separator(args) do
+    case Keyword.get(args, :tx_separator) do
+      nil -> Keyword.get(args, :separator, "\n")
+      val -> val
+    end
+  end
+
   def add_framing(data, state) do
-    {:ok, data <> state.separator, state}
+    {:ok, data <> state.tx_separator, state}
   end
 
   def remove_framing(data, state) do
     {new_processed, new_in_process, lines} =
-      process_data(state.separator,
-                  byte_size(state.separator),
+      process_data(state.rx_separator,
+                  byte_size(state.rx_separator),
                   state.max_length,
                   state.processed,
                   state.in_process <> data, [])
@@ -81,19 +99,19 @@ defmodule Nerves.UART.Framing.Line do
   end
 
   # Process data until separator or next char
-  defp process_data(separator, sep_length, max_length, processed, to_process, lines) do
+  defp process_data(rx_separator, sep_length, max_length, processed, to_process, lines) do
     case to_process do
       # Handle separater
-      <<^separator::binary-size(sep_length), rest::binary>> ->
+      <<^rx_separator::binary-size(sep_length), rest::binary>> ->
         new_lines = lines ++ [processed]
-        process_data(separator, sep_length, max_length, <<>>, rest, new_lines)
+        process_data(rx_separator, sep_length, max_length, <<>>, rest, new_lines)
       # Handle line too long case
       to_process when byte_size(processed) == max_length and to_process != <<>> ->
         new_lines = lines ++ [{:partial, processed}]
-        process_data(separator, sep_length, max_length, <<>>, to_process, new_lines)
+        process_data(rx_separator, sep_length, max_length, <<>>, to_process, new_lines)
       # Handle next char
       <<next_char::binary-size(1), rest::binary>> ->
-        process_data(separator, sep_length, max_length, processed <> next_char, rest, lines)
+        process_data(rx_separator, sep_length, max_length, processed <> next_char, rest, lines)
     end
   end
 
